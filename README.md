@@ -48,7 +48,7 @@ Apple silicon, many NAS units).
 ### Option 1: docker run
 
 ```bash
-docker run -d --name unifi-security-console --restart unless-stopped -p 127.0.0.1:8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
+docker run -d --name unifi-security-console --restart unless-stopped -p 8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
 ```
 
 ### Option 2: docker compose
@@ -63,7 +63,7 @@ services:
     container_name: unifi-security-console
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8787:8787"
+      - "8787:8787"
     volumes:
       - usc-data:/data
 
@@ -72,8 +72,9 @@ volumes:
     name: unifi-security-console-data
 ```
 
-Either way the dashboard listens on <http://localhost:8787> (this machine only) and keeps everything in the
-Docker volume `unifi-security-console-data`, so you can switch between the two without losing anything.
+Either way the dashboard is at **http://<server address>:8787**, for example <http://192.168.1.20:8787> (or
+<http://localhost:8787> on the server itself). Everything is kept in the Docker volume
+`unifi-security-console-data`, so you can switch between the two ways without losing anything.
 
 **Optional settings** such as the sign-in account, `APP_SECRET` or `ALLOWED_HOSTS` go in a `.env` file (copy
 [.env.example](.env.example)). Pass it with `--env-file .env` to `docker run`, or add `env_file: .env` under the
@@ -81,8 +82,9 @@ service in the compose file (the downloadable file already reads a `.env` next t
 
 ### First start
 
-1. **Create your account.** Open <http://localhost:8787>. The first visit asks for a username and a password (at
-   least 12 characters); until then nothing else is reachable.
+1. **Create your account right away.** Open the dashboard; the first visit asks for a username and a password (at
+   least 12 characters), and until then nothing else is reachable. Whoever opens it first creates the account, so
+   do it as soon as the container is running, or preset it with `APP_USERNAME` / `APP_PASSWORD`.
 2. **Connect your console.**
    1. In UniFi Network open **Settings → Control Plane → Integrations → Create API Key** and copy the key (it is
       shown once). The key has the permissions of the admin who creates it.
@@ -103,7 +105,7 @@ With docker run, remove the container and start it again with `--pull always` (t
 
 ```bash
 docker rm -f unifi-security-console
-docker run -d --pull always --name unifi-security-console --restart unless-stopped -p 127.0.0.1:8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
+docker run -d --pull always --name unifi-security-console --restart unless-stopped -p 8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
 ```
 
 To stay on one version, use one of the tags on the [package page](https://github.com/kcorr/unifi-security-console/pkgs/container/unifi-security-console) (each commit has one) instead of `latest`.
@@ -144,12 +146,17 @@ docker rm -f unifi-security-console           # or: docker compose down
 docker volume rm unifi-security-console-data  # only if you also want to delete your data
 ```
 
-### Reaching it from other machines
+### Access from other machines, or from this one only
 
-The port is published on `127.0.0.1` only. To open it on your LAN, create your account first (or set
-`APP_USERNAME` / `APP_PASSWORD`), publish the port as `8787:8787` (`-p 8787:8787`, or in the compose file), and
-list the address you use in `ALLOWED_HOSTS` (requests for any other host name are refused, which blocks DNS
-rebinding). Put it behind a reverse proxy with HTTPS if it leaves a trusted network.
+The commands above publish port 8787 on all of the server's addresses, so other machines on your network can open
+the dashboard by IP address (`http://192.168.1.20:8787`), by a one-word name (`http://dockerhost:8787`) or by a
+local name ending in `.lan`, `.local`, `.home.arpa` or `.internal`. No setting is needed for any of these.
+
+- **A domain name**, for example behind a reverse proxy such as Traefik or Caddy: add it to `ALLOWED_HOSTS`
+  (`ALLOWED_HOSTS=usc.example.com`). Other names that look public are refused, which stops DNS rebinding: a hostile
+  website pointing its own domain at your server to reach the dashboard through a visitor's browser. Use HTTPS if
+  the dashboard leaves a trusted network.
+- **This machine only** (a desktop rather than a server): publish the port as `127.0.0.1:8787:8787` instead.
 
 ### Build it yourself
 
@@ -172,8 +179,8 @@ All variables are optional; `.env.example` explains each one. Pass them as descr
 | --- | --- |
 | `APP_USERNAME`, `APP_PASSWORD` | Create the sign-in account at the first start instead of in the browser. Used once, while no account exists. |
 | `APP_SECRET` | Encrypts stored API keys and signs sessions with this secret instead of a random key kept in the volume. Keep it: changing it makes stored keys unreadable. |
-| `ALLOWED_HOSTS` | Extra host names the dashboard answers to, comma separated (for LAN access). |
-| `UNIFI_URL`, `UNIFI_API_KEY`, `UNIFI_SITE`, `UNIFI_VERIFY_TLS`, `WRITE_MODE` | Seed the first environment at the first start. |
+| `ALLOWED_HOSTS` | Domain names the dashboard answers to, comma separated, such as one behind a reverse proxy. IP addresses and local names (one word, `.lan`, `.local`, `.home.arpa`, `.internal`) always work. |
+| `UNIFI_URL`, `UNIFI_API_KEY`, `UNIFI_SITE`, `UNIFI_VERIFY_TLS`, `WRITE_MODE` | Seed the first environment at the first start. If you preset a key, preset `APP_USERNAME` / `APP_PASSWORD` too, so nobody else can create the account first. |
 | `THREAT_RETENTION_DAYS` | Days of threat history kept (default 30). |
 | `INTEL_*`, `ABUSEIPDB_API_KEY`, `GREYNOISE_API_KEY` | IP intelligence sources (see below). |
 
@@ -225,6 +232,9 @@ allow rules that would silently override a new block are reported, and the new r
   reaches an impostor. If the console's certificate changes, Settings shows both fingerprints and lets you trust
   the new one.
 - API keys are stored encrypted in the data volume. Treat the volume (and backups of it) as sensitive.
+- Requests must carry an IP address, a local name or a name from `ALLOWED_HOSTS` (see above), which blocks DNS
+  rebinding. Every other request needs the sign-in session (an HttpOnly, SameSite=Strict cookie), and changes also
+  need a custom request header that other websites can't send.
 
 ## Which UniFi APIs are used
 

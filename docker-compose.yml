@@ -8,9 +8,8 @@ services:
       - path: .env
         required: false
     ports:
-      # Bound to localhost only: this app holds an API key that can change your firewall.
-      # Change to "8787:8787" only after creating your account (or set APP_USERNAME / APP_PASSWORD),
-      # and add the address you use to ALLOWED_HOSTS.
+      # Development build: this machine only. Use "8787:8787" to reach it from your network (by IP address or a
+      # local name; a domain behind a reverse proxy goes in ALLOWED_HOSTS). Create your account first.
       - "127.0.0.1:8787:8787"
     volumes:
       - usc-data:/data

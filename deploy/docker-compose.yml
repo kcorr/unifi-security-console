@@ -3,7 +3,7 @@
 #   1. Save this file as docker-compose.yml in an empty folder. Optional: put a .env next to it
 #      (see .env.example in the repository) to preset the sign-in account, APP_SECRET, ALLOWED_HOSTS...
 #   2. docker compose up -d
-#   3. Open http://localhost:8787 and create your account.
+#   3. Open http://<server address>:8787 right away and create your account (whoever opens it first creates it).
 #
 # Update to the newest version:  docker compose up -d --pull always
 # Stay on one version instead:   replace "latest" with a tag from the package page:
@@ -21,9 +21,9 @@ services:
       - path: .env
         required: false
     ports:
-      # This machine only: the app holds an API key that can change your firewall. To open it on your LAN,
-      # create your account first, use "8787:8787" here and add the address you use to ALLOWED_HOSTS in .env.
-      - "127.0.0.1:8787:8787"
+      # Reachable from your network at http://<server address>:8787 (IP addresses and local names work as they are;
+      # a domain behind a reverse proxy goes in ALLOWED_HOSTS). For this machine only, use "127.0.0.1:8787:8787".
+      - "8787:8787"
     volumes:
       - usc-data:/data
 

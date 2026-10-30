@@ -9,6 +9,7 @@ import fastifyStatic from '@fastify/static';
 import type { EnvInput, NetworkRole, Severity, SettingsUpdate, ThreatDirection, ThreatQuery } from '../shared/types.ts';
 import { APP_PASSWORD, APP_PORT, APP_USERNAME, settingsView } from './config.ts';
 import { Auth, LoginThrottle } from './auth.ts';
+import { hostAllowed, hostName, parseAllowedHosts } from './hosts.ts';
 import { HttpError } from './errors.ts';
 import { LIVE_RANGES, type LiveRange } from '../shared/types.ts';
 import { AppService } from './service.ts';
@@ -27,18 +28,16 @@ if (seeded) app.log.info(seeded);
 // Everything else needs a signed-in session, and before the account exists nobody has one.
 const OPEN_ROUTES = new Set(['/api/health', '/api/status', '/api/setup', '/api/login', '/api/logout']);
 
-// Only these host names may address the app, so a hostile web page can't reach it through DNS rebinding.
-// ALLOWED_HOSTS adds more (e.g. "unifi-sec.lan,192.168.1.20"); "*" turns the check off.
-const ALLOWED_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', ...(process.env.ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)]);
-const hostAllowed = (host: string | undefined) => {
-  if (ALLOWED_HOSTS.has('*')) return true;
-  const name = (host ?? '').toLowerCase().replace(/:\d+$/, '');
-  return ALLOWED_HOSTS.has(name) || name.endsWith('.localhost');
-};
+// IP addresses and local names always work; public-looking names must be listed (see hosts.ts).
+const ALLOWED_HOSTS = parseAllowedHosts(process.env.ALLOWED_HOSTS);
 
 app.addHook('onRequest', async (req, reply) => {
-  if (!hostAllowed(req.headers.host)) {
-    return reply.code(403).type('text/plain').send(`This address (${req.headers.host ?? 'none'}) is not allowed. Open the app at http://localhost, or add the name to ALLOWED_HOSTS.`);
+  if (!hostAllowed(req.headers.host, ALLOWED_HOSTS)) {
+    const name = hostName(req.headers.host) || 'none';
+    return reply
+      .code(403)
+      .type('text/plain')
+      .send(`The name "${name}" is not allowed, to protect against DNS rebinding. Open the dashboard by its IP address or a local name instead, or add "${name}" to ALLOWED_HOSTS.`);
   }
   // Decide on the route that actually matched, not on the raw URL: the router decodes "%61pi" and ignores an
   // absolute-form host, so checking the URL text could be walked around.
@@ -366,4 +365,8 @@ await app.listen({ port: APP_PORT, host: process.env.HOST ?? '127.0.0.1' });
 await service.start();
 const envs = service.environments();
 app.log.info(envs.length ? `Environments: ${envs.map((e) => `${e.name} (${e.url})`).join(', ')}` : 'No environments yet - open the UI to connect a UniFi controller');
-if (!auth.hasAccount) app.log.info('No sign-in account yet - open the UI to create one');
+if (!auth.hasAccount) {
+  // Whoever opens the dashboard first creates the account, which matters most once a console is already connected.
+  if (envs.length) app.log.warn('No sign-in account yet although a UniFi console is connected: create it now, or set APP_USERNAME / APP_PASSWORD');
+  else app.log.info('No sign-in account yet - open the dashboard to create one');
+}

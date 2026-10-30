@@ -80,10 +80,12 @@ test('the password cannot be walked around with encoded or absolute URLs', async
   assert.equal((await request({ path: '/%61pi/environments', method: 'POST', headers: { 'x-requested-with': 'usc', 'content-type': 'application/json' } })).status, 401);
 });
 
-test('requests for host names other than localhost are refused (DNS rebinding)', async () => {
+test('public-looking host names are refused (DNS rebinding); IP addresses and local names work', async () => {
   assert.equal((await request({ path: '/api/health', host: 'evil.example:8787' })).status, 403);
   assert.equal((await request({ path: '/', host: 'evil.example' })).status, 403);
   assert.equal((await request({ path: '/api/health', host: '127.0.0.1' })).status, 200);
+  assert.equal((await request({ path: '/api/health', host: '192.168.1.20:8787' })).status, 200, 'a Docker server opened by its LAN address');
+  assert.equal((await request({ path: '/api/health', host: 'dockerhost.lan:8787' })).status, 200);
 });
 
 test('before signing in, status only says that a sign-in is needed', async () => {
