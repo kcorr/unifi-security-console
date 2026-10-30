@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Security-focused dashboard for UniFi networks: threats, IP intelligence, firewall/segmentation analysis and one-click hardening.",
+  "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=24"

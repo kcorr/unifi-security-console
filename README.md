@@ -240,3 +240,9 @@ server/
 shared/types.ts API contract shared with the UI
 web/            React + Vite + Tailwind UI
 ```
+
+## License
+
+[MIT](LICENSE). UniFi is a trademark of Ubiquiti Inc.; this project is not affiliated with or endorsed by
+Ubiquiti. Data the app downloads on request keeps its own license (DB-IP Lite: CC BY 4.0; the IEEE MAC
+address register: IEEE's terms).
