@@ -48,7 +48,7 @@ Apple silicon, many NAS units).
 ### Option 1: docker run
 
 ```bash
-docker run -d --name unifi-security-console --restart unless-stopped -p 8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
+docker run -d --pull always --name unifi-security-console --restart unless-stopped -p 8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
 ```
 
 ### Option 2: docker compose
@@ -60,6 +60,7 @@ which has comments), then run `docker compose up -d` in that folder:
 services:
   unifi-security:
     image: ghcr.io/kcorr/unifi-security-console:latest
+    pull_policy: always
     container_name: unifi-security-console
     restart: unless-stopped
     ports:
