@@ -6,7 +6,8 @@
 #   3. Open http://localhost:8787 and create your account.
 #
 # Update to the newest version:  docker compose up -d --pull always
-# Stay on one version instead:   replace "latest" with a release, e.g. ghcr.io/kcorr/unifi-security-console:1.0
+# Stay on one version instead:   replace "latest" with a tag from the package page:
+#   https://github.com/kcorr/unifi-security-console/pkgs/container/unifi-security-console
 #
 # Your data (account, settings, encrypted API keys, history, change log) is in the volume
 # "unifi-security-console-data", the same one the README's docker run command uses.

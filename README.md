@@ -106,7 +106,7 @@ docker rm -f unifi-security-console
 docker run -d --pull always --name unifi-security-console --restart unless-stopped -p 127.0.0.1:8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
 ```
 
-To stay on one version, use a release tag such as `ghcr.io/kcorr/unifi-security-console:1.0` instead of `latest`.
+To stay on one version, use one of the tags on the [package page](https://github.com/kcorr/unifi-security-console/pkgs/container/unifi-security-console) (each commit has one) instead of `latest`.
 
 ### Back up and restore your data
 
