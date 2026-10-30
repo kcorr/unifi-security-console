@@ -41,69 +41,89 @@ your own console (and the optional, passive IP lookups you switch on).
 
 ## Install with Docker
 
-1. **Get the code**
+Pick one of the two ways below. Docker downloads the ready-made image the first time it starts, so there is
+nothing to clone or build. The image runs on regular PCs and servers (amd64) and on ARM (Raspberry Pi 4/5,
+Apple silicon, many NAS units).
 
-   ```bash
-   git clone https://github.com/kcorr/unifi-security-console.git
-   cd unifi-security-console
-   ```
+### Option 1: docker run
 
-2. **Optional: settings.** Everything can be set in the browser, so this step can be skipped. To preset values
-   (for example the sign-in account, or an `APP_SECRET`), copy the template and edit it. `.env` is never
-   committed.
+```bash
+docker run -d --name unifi-security-console --restart unless-stopped -p 127.0.0.1:8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
+```
 
-   ```bash
-   cp .env.example .env
-   ```
+### Option 2: docker compose
 
-3. **Build and start**
+Save this as `docker-compose.yml` in an empty folder (or download [deploy/docker-compose.yml](deploy/docker-compose.yml),
+which has comments), then run `docker compose up -d` in that folder:
 
-   ```bash
-   docker compose up -d --build
-   ```
+```yaml
+services:
+  unifi-security:
+    image: ghcr.io/kcorr/unifi-security-console:latest
+    container_name: unifi-security-console
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - usc-data:/data
 
-   The dashboard listens on <http://localhost:8787>, on this machine only. Its data (settings, encrypted API
-   keys, threat history, change log) lives in the Docker volume `usc-data`.
+volumes:
+  usc-data:
+    name: unifi-security-console-data
+```
 
-4. **Create your account.** Open <http://localhost:8787>. The first visit asks for a username and a password
-   (at least 12 characters); until then nothing else is reachable.
+Either way the dashboard listens on <http://localhost:8787> (this machine only) and keeps everything in the
+Docker volume `unifi-security-console-data`, so you can switch between the two without losing anything.
 
-5. **Connect your console**
-   1. In UniFi Network open **Settings → Control Plane → Integrations → Create API Key** and copy the key (it
-      is shown once). The key has the permissions of the admin who creates it.
+**Optional settings** such as the sign-in account, `APP_SECRET` or `ALLOWED_HOSTS` go in a `.env` file (copy
+[.env.example](.env.example)). Pass it with `--env-file .env` to `docker run`, or add `env_file: .env` under the
+service in the compose file (the downloadable file already reads a `.env` next to it).
+
+### First start
+
+1. **Create your account.** Open <http://localhost:8787>. The first visit asks for a username and a password (at
+   least 12 characters); until then nothing else is reachable.
+2. **Connect your console.**
+   1. In UniFi Network open **Settings → Control Plane → Integrations → Create API Key** and copy the key (it is
+      shown once). The key has the permissions of the admin who creates it.
    2. In the dashboard, enter the console address (for example `https://192.168.1.1`) and the key, click
       **Test connection**, then **Save & connect**. A console with several sites can be added once per site.
-
-6. **Choose how much the console may change** (Settings → Change safety). Every environment starts
-   **read-only**: you can preview every fix, but nothing is sent to UniFi until you choose otherwise.
+3. **Choose how much the console may change** (Settings → Change safety). Every environment starts **read-only**:
+   you can preview every fix, but nothing is sent to UniFi until you choose otherwise.
 
 ### Updating
 
+With docker compose, in the folder with the file:
+
 ```bash
-git pull
-docker compose up -d --build
+docker compose up -d --pull always
 ```
 
-Your data stays in the volume.
+With docker run, remove the container and start it again with `--pull always` (the data stays in the volume):
+
+```bash
+docker rm -f unifi-security-console
+docker run -d --pull always --name unifi-security-console --restart unless-stopped -p 127.0.0.1:8787:8787 -v unifi-security-console-data:/data ghcr.io/kcorr/unifi-security-console:latest
+```
+
+To stay on one version, use a release tag such as `ghcr.io/kcorr/unifi-security-console:1.0` instead of `latest`.
 
 ### Back up and restore your data
 
-The volume holds your account, settings, encrypted API keys, history and the change log that undo needs. Find
-its exact name (Compose prefixes it with the folder name), then copy it into a file:
+The volume holds your account, settings, encrypted API keys, history and the change log that undo needs.
 
 ```bash
-docker volume ls --filter name=usc-data
-docker compose stop
-docker run --rm -v unifi-security-console_usc-data:/data -v "$PWD":/backup alpine tar czf /backup/usc-backup.tgz -C /data .
-docker compose start
+docker stop unifi-security-console
+docker run --rm -v unifi-security-console-data:/data -v "$PWD":/backup alpine tar czf /backup/usc-backup.tgz -C /data .
+docker start unifi-security-console
 ```
 
 To restore, stop the console and unpack the file into the volume:
 
 ```bash
-docker compose stop
-docker run --rm -v unifi-security-console_usc-data:/data -v "$PWD":/backup alpine sh -c "rm -rf /data/* && tar xzf /backup/usc-backup.tgz -C /data"
-docker compose start
+docker stop unifi-security-console
+docker run --rm -v unifi-security-console-data:/data -v "$PWD":/backup alpine sh -c "rm -rf /data/* && tar xzf /backup/usc-backup.tgz -C /data"
+docker start unifi-security-console
 ```
 
 Treat the backup like the API key itself: unless `APP_SECRET` is set, the key that decrypts your API keys is in
@@ -120,20 +140,33 @@ This removes only the sign-in account (environments, keys and history stay); the
 ### Remove it
 
 ```bash
-docker compose down      # stops and removes the container; your data stays
-docker compose down -v   # also deletes the data volume
+docker rm -f unifi-security-console           # or: docker compose down
+docker volume rm unifi-security-console-data  # only if you also want to delete your data
 ```
 
 ### Reaching it from other machines
 
 The port is published on `127.0.0.1` only. To open it on your LAN, create your account first (or set
-`APP_USERNAME` / `APP_PASSWORD`), change the port mapping in `docker-compose.yml` to `"8787:8787"`, and list the
-address you use in `ALLOWED_HOSTS` in `.env` (requests for any other host name are refused, which blocks DNS
+`APP_USERNAME` / `APP_PASSWORD`), publish the port as `8787:8787` (`-p 8787:8787`, or in the compose file), and
+list the address you use in `ALLOWED_HOSTS` (requests for any other host name are refused, which blocks DNS
 rebinding). Put it behind a reverse proxy with HTTPS if it leaves a trusted network.
+
+### Build it yourself
+
+To run your own changes, build from a clone instead of using the published image:
+
+```bash
+git clone https://github.com/kcorr/unifi-security-console.git
+cd unifi-security-console
+docker compose up -d --build
+```
+
+The volume is then named after the folder (for example `unifi-security-console_usc-data`); `docker volume ls`
+shows it.
 
 ## Configuration
 
-All variables are optional; `.env.example` explains each one.
+All variables are optional; `.env.example` explains each one. Pass them as described under **Optional settings** above.
 
 | Variable | What it does |
 | --- | --- |
@@ -239,6 +272,8 @@ server/
   index.ts      HTTP API, live stream and the web UI
 shared/types.ts API contract shared with the UI
 web/            React + Vite + Tailwind UI
+deploy/         docker-compose.yml that runs the published image
+.github/        CI: tests every push, then publishes the image to ghcr.io
 ```
 
 ## License

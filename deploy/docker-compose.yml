@@ -1,0 +1,31 @@
+# UniFi Security Console: nothing to clone or build. Docker downloads the image on the first start.
+#
+#   1. Save this file as docker-compose.yml in an empty folder. Optional: put a .env next to it
+#      (see .env.example in the repository) to preset the sign-in account, APP_SECRET, ALLOWED_HOSTS...
+#   2. docker compose up -d
+#   3. Open http://localhost:8787 and create your account.
+#
+# Update to the newest version:  docker compose up -d --pull always
+# Stay on one version instead:   replace "latest" with a release, e.g. ghcr.io/kcorr/unifi-security-console:1.0
+#
+# Your data (account, settings, encrypted API keys, history, change log) is in the volume
+# "unifi-security-console-data", the same one the README's docker run command uses.
+
+services:
+  unifi-security:
+    image: ghcr.io/kcorr/unifi-security-console:latest
+    container_name: unifi-security-console
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      # This machine only: the app holds an API key that can change your firewall. To open it on your LAN,
+      # create your account first, use "8787:8787" here and add the address you use to ALLOWED_HOSTS in .env.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - usc-data:/data
+
+volumes:
+  usc-data:
+    name: unifi-security-console-data

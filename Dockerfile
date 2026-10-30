@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
 
+# Published for amd64 and arm64. The first two stages run once on the build machine: the UI is static files and
+# every runtime dependency is plain JavaScript, so their output fits every platform's image.
+
 # ---- 1. Build the web UI -------------------------------------------------------
-FROM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -11,7 +14,7 @@ COPY shared ./shared
 RUN npm run build
 
 # ---- 2. Production dependencies only -------------------------------------------
-FROM node:24-alpine AS deps
+FROM --platform=$BUILDPLATFORM node:24-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
@@ -19,7 +22,11 @@ RUN npm ci --omit=dev --no-audit --no-fund
 # ---- 3. Runtime ----------------------------------------------------------------
 FROM node:24-alpine
 WORKDIR /app
-# HOST=0.0.0.0 is needed inside the container; docker-compose publishes the port on 127.0.0.1 only.
+LABEL org.opencontainers.image.title="UniFi Security Console" \
+      org.opencontainers.image.description="Self-hosted security dashboard for UniFi networks" \
+      org.opencontainers.image.source="https://github.com/kcorr/unifi-security-console" \
+      org.opencontainers.image.licenses="MIT"
+# HOST=0.0.0.0 is needed inside the container; publish the port on 127.0.0.1 only (see the README).
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787 \
