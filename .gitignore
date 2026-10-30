@@ -1,0 +1,16 @@
+node_modules/
+web/dist/
+data/
+
+# Secrets and backups never leave this machine
+.env
+.env.*
+!.env.example
+usc-backup*.tgz
+*.tgz
+
+*.log
+.DS_Store
+
+# Local tool settings
+.claude/

@@ -1,0 +1,4 @@
+# Same line endings everywhere, so Docker and Node behave alike on every OS.
+* text=auto eol=lf
+*.png binary
+*.ico binary

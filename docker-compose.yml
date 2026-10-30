@@ -1,0 +1,19 @@
+services:
+  unifi-security:
+    build: .
+    image: unifi-security-console:local
+    container_name: unifi-security-console
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      # Bound to localhost only: this app holds an API key that can change your firewall.
+      # Change to "8787:8787" only after creating your account (or set APP_USERNAME / APP_PASSWORD),
+      # and add the address you use to ALLOWED_HOSTS.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - usc-data:/data
+
+volumes:
+  usc-data:

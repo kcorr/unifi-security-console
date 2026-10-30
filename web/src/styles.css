@@ -1,0 +1,106 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --color-surface: #0f1524;
+  --color-surface-2: #141b2d;
+  --color-surface-3: #1a2338;
+  --color-line: #222c44;
+  --color-line-2: #2c3854;
+  --color-ink: #e6eaf2;
+  --color-ink-2: #a7b0c4;
+  --color-ink-3: #6f7a93;
+  --color-brand: #22d3ee;
+  --color-brand-2: #6366f1;
+  --animate-pulse-slow: pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #0a0e18;
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum';
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2c3854 transparent;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Subtle animated live indicator */
+@keyframes ping-soft {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: inherit;
+  animation: ping-soft 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.slide-in {
+  animation: slide-in 0.18s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+
+@keyframes flash-row {
+  from {
+    background-color: rgba(34, 211, 238, 0.16);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.flash-row {
+  animation: flash-row 2.5s ease-out;
+}
+
+.recharts-tooltip-wrapper {
+  outline: none;
+}

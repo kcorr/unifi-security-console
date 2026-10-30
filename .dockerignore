@@ -1,0 +1,11 @@
+node_modules
+web/dist
+data
+.env
+.git
+*.log
+
+# Tests and their throwaway certificates stay out of the image.
+**/*.test.ts
+server/unifi/fixtures
+server/testing

@@ -1,0 +1,21 @@
+{
+  // Server + shared code. Runs directly on Node 24 via native type stripping,
+  // so only erasable TypeScript syntax is allowed (no enums / namespaces / parameter properties).
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["server/**/*.ts", "shared/**/*.ts"]
+}
