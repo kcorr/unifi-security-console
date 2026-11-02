@@ -573,7 +573,7 @@ function RecentThreats({ events, fresh }: { events: ThreatEvent[]; fresh: Set<st
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm text-ink">{e.headline}</div>
             <div className="flex min-w-0 items-center gap-1.5 text-xs text-ink-3">
-              <EventEnd e={e} ip={e.srcIp} /> <span className="shrink-0">→</span> <EventEnd e={e} ip={e.dstIp} />
+              <EventEnd e={e} end="src" /> <span className="shrink-0">→</span> <EventEnd e={e} end="dst" />
             </div>
           </div>
           <div className="hidden shrink-0 items-center gap-1.5 sm:flex">

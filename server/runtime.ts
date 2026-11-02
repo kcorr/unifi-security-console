@@ -10,7 +10,7 @@ import type {
 } from '../shared/types.ts';
 import { NETWORK_ROLES } from '../shared/types.ts';
 import { DATA_DIR, keyHint, type Config } from './config.ts';
-import { openDb, type Db } from './db.ts';
+import { kvGet, kvSet, openDb, type Db } from './db.ts';
 import { isCloudUrl, type EnvRecord } from './environments.ts';
 import { HttpError } from './errors.ts';
 import { buildLiveClients, buildLiveSnapshot, ClientTraffic, findGateway, LiveHub, liveTrend, usageByMac } from './live.ts';
@@ -66,6 +66,8 @@ const CLIENTS_MS = 15_000;
 const THREATS_MS = 60_000;
 const CONFIG_MS = 120_000;
 const BACKFILL_DAYS = 7;
+/** Raised when threat parsing learns to read something it used to drop, so the last week is read again once. */
+const THREAT_PARSER = 2;
 
 export class EnvRuntime {
   env: EnvRecord;
@@ -252,7 +254,9 @@ export class EnvRuntime {
       const ip = d.ip as string | undefined;
       if (ip && !wanIps.has(ip)) byIp.set(ip, { mac: (d.mac as string) ?? null, name: (d.name as string) ?? null, networkId: null });
     }
-    return { networks: model.networks, wanIps, byIp, byMac };
+    const pots = raw.settings.ips?.honeypot;
+    const honeypots = (Array.isArray(pots) ? (pots as Obj[]) : []).map((h) => h.ip_address).filter((ip): ip is string => typeof ip === 'string' && !!ip);
+    return { networks: model.networks, wanIps, byIp, byMac, honeypots };
   }
 
   async refresh(force: boolean): Promise<void> {
@@ -478,12 +482,15 @@ export class EnvRuntime {
     if (!this.snap) return;
     const now = Date.now();
     const latest = this.threats.latestTs();
-    const from = latest ? Math.max(latest - 10 * 60e3, now - BACKFILL_DAYS * 86400e3) : now - BACKFILL_DAYS * 86400e3;
+    // Version 2 reads honeypot hits, which were dropped before. Events already stored are not added twice.
+    const reread = kvGet<number>(this.db, 'threat-parser')?.value !== THREAT_PARSER;
+    const from = latest && !reread ? Math.max(latest - 10 * 60e3, now - BACKFILL_DAYS * 86400e3) : now - BACKFILL_DAYS * 86400e3;
     const res = await fetchThreats(this.client, from, now);
+    if (reread) kvSet(this.db, 'threat-parser', THREAT_PARSER);
     this.threatSources = res.sources;
     const events = res.events.map((r) => toThreatEvent(r, this.snap!.dir));
     const fresh = this.threats.upsert(events);
-    if (!initial && latest) {
+    if (!initial && latest && !reread) {
       for (const e of fresh.sort((a, b) => a.ts - b.ts).slice(-25)) this.live.broadcast({ type: 'threat', data: e });
     }
     if (fresh.length && this.snap.posture) this.snap.posture = undefined;

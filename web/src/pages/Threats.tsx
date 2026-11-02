@@ -8,8 +8,8 @@ import { api } from '../lib/api';
 import { useLive } from '../lib/live';
 import { countryName, fmtNum, fmtTime, timeAgo } from '../lib/format';
 import {
-  ActionBadge, Badge, Button, Callout, Card, CountryTag, DirectionBadge, Drawer, EmptyState, ErrorBox, EventEnd, InfoTip, IpLink, KV, Loading, PageHeader, Segmented, SEVERITY_HEX, SeverityBadge, Tabs,
-  VerdictBadge,
+  ActionBadge, Badge, Button, Callout, Card, CountryTag, DirectionBadge, Drawer, EmptyState, ErrorBox, EventEnd, InfoTip, IpLink, KV, Loading, localEnd, PageHeader, Segmented, SEVERITY_HEX, SeverityBadge,
+  Tabs, VerdictBadge,
 } from '../components/ui';
 import { HBarList, ThreatTimeline } from '../components/charts';
 import { WorldMap } from '../components/WorldMap';
@@ -177,10 +177,14 @@ export function ThreatsPage() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {s.suspects.map((x) => (
-                  <Link key={x.ip} to={`/investigate/${encodeURIComponent(x.ip)}`} className="rounded-lg border border-rose-500/30 bg-surface/70 px-3 py-2 text-sm hover:border-rose-400/60">
+                  <Link
+                    key={x.ip || x.name}
+                    to={x.ip ? `/investigate/${encodeURIComponent(x.ip)}` : `/threats?category=${encodeURIComponent(x.categories[0] ?? '')}`}
+                    className="rounded-lg border border-rose-500/30 bg-surface/70 px-3 py-2 text-sm hover:border-rose-400/60"
+                  >
                     <div className="font-medium text-ink">{x.name ?? x.ip}</div>
                     <div className="text-xs text-ink-3">
-                      {x.ip}
+                      {x.ip || 'address not reported'}
                       {x.network ? ` · ${x.network}` : ''} · {x.count} detection{x.count === 1 ? '' : 's'} · {x.categories.map(catName).join(', ')}
                     </div>
                   </Link>
@@ -375,7 +379,7 @@ function EventsTable(props: { events: ThreatEvent[]; total: number; page: number
               <span className="shrink-0 text-xs text-ink-3">{timeAgo(e.ts)}</span>
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 pl-4 text-xs text-ink-3">
-              <EventEnd e={e} ip={e.srcIp} /> <span className="shrink-0">→</span> <EventEnd e={e} ip={e.dstIp} />
+              <EventEnd e={e} end="src" /> <span className="shrink-0">→</span> <EventEnd e={e} end="dst" />
             </div>
             <div className="mt-1.5 flex flex-wrap gap-1.5 pl-4">
               <DirectionBadge direction={e.direction} />
@@ -412,16 +416,15 @@ function EventsTable(props: { events: ThreatEvent[]; total: number; page: number
                     {props.catName(e.categoryKey)} · {e.signature}
                   </div>
                 </td>
-                <td className="px-2 py-2.5 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    {e.direction === 'inbound' && e.remoteCountry && <CountryTag code={e.remoteCountry} />}
-                    <span className="mono text-ink-2">{e.srcIp}</span>
-                    {e.srcPort ? <span className="text-ink-3">:{e.srcPort}</span> : null}
+                <td className="max-w-[260px] px-2 py-2.5 text-xs">
+                  <div className="flex min-w-0 items-center gap-1.5 text-ink-2">
+                    <EventEnd e={e} end="src" />
+                    {e.srcPort ? <span className="shrink-0 text-ink-3">:{e.srcPort}</span> : null}
                   </div>
-                  <div className="flex items-center gap-1.5 text-ink-3">
-                    → {e.direction !== 'inbound' && e.remoteCountry && <CountryTag code={e.remoteCountry} />}
-                    <span className={clsx(e.local && e.localIp === e.dstIp ? 'text-ink-2' : 'mono')}>{e.local && e.localIp === e.dstIp && e.local.name ? e.local.name : e.dstIp}</span>
-                    {e.dstPort ? <span>:{e.dstPort}</span> : null}
+                  <div className="flex min-w-0 items-center gap-1.5 text-ink-3">
+                    <span className="shrink-0">→</span>
+                    <EventEnd e={e} end="dst" />
+                    {e.dstPort ? <span className="shrink-0">:{e.dstPort}</span> : null}
                   </div>
                 </td>
                 <td className="px-2 py-2.5">
@@ -571,7 +574,9 @@ function EventVerdict({ e, who }: { e: ThreatEvent; who: IpIntel | null }) {
   const noise = level === 'scanner' || level === 'benign' ? ` The sender is ${who?.knownScanner?.name ?? 'a known internet scanner'}, so this is routine background noise.` : '';
   const bad = level === 'malicious' || level === 'suspicious' ? ' The sender has a bad reputation, so blocking it permanently is reasonable.' : '';
   let v: { tone: 'success' | 'warn' | 'danger' | 'info'; title: string; text: string };
-  if (e.direction === 'outbound' || e.direction === 'internal') {
+  if (e.categoryKey === 'honeypot') {
+    v = { tone: 'danger', title: `${device} connected to your honeypot`, text: e.advice };
+  } else if (e.direction === 'outbound' || e.direction === 'internal') {
     v = { tone: serious ? 'danger' : 'warn', title: `Started by ${device} on your network${e.action === 'blocked' ? ', and blocked' : ''}`, text: e.advice };
   } else if (e.action === 'blocked') {
     v = { tone: 'success', title: 'Blocked — no action needed', text: `Your IPS stopped this before it reached your network. If the same source keeps coming back, you can block it permanently.${noise}${bad}` };
@@ -585,6 +590,14 @@ function EventVerdict({ e, who }: { e: ThreatEvent; who: IpIntel | null }) {
       {v.text}
     </Callout>
   );
+}
+
+/** One end of the connection: a link to look the address up, named when it is your device or the honeypot. */
+function EndLink({ e, end }: { e: ThreatEvent; end: 'src' | 'dst' }) {
+  const ip = end === 'src' ? e.srcIp : e.dstIp;
+  const name = end === localEnd(e) ? (e.local?.name ?? null) : end === 'dst' && e.categoryKey === 'honeypot' ? 'Honeypot' : null;
+  if (ip) return <IpLink ip={ip} name={name} />;
+  return name ? <span className="text-ink">{name} <span className="text-ink-3">(address not reported)</span></span> : <span className="text-ink-3">—</span>;
 }
 
 function ThreatDrawer({ event: e, open, onClose, category, onBlock }: { event: ThreatEvent | null; open: boolean; onClose: () => void; category: ThreatCategory | null; onBlock: (ip: string) => void }) {
@@ -612,8 +625,8 @@ function ThreatDrawer({ event: e, open, onClose, category, onBlock }: { event: T
           <section>
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-ink-3">Connection</h3>
             <dl>
-              <KV k="Source" v={<IpLink ip={e.srcIp} name={e.local?.ip === e.srcIp ? e.local.name : null} />} />
-              <KV k="Destination" v={<IpLink ip={e.dstIp} name={e.local?.ip === e.dstIp ? e.local.name : null} />} />
+              <KV k="Source" v={<EndLink e={e} end="src" />} />
+              <KV k="Destination" v={<EndLink e={e} end="dst" />} />
               <KV k="Ports" v={`${e.srcPort ?? '—'} → ${e.dstPort ?? '—'}`} mono />
               <KV k="Protocol" v={[e.proto, e.appProto].filter(Boolean).join(' / ') || '—'} />
               {e.local && <KV k="Your device" v={`${e.local.name ?? 'Unknown device'}${e.local.network ? ` · ${e.local.network}` : ''}${e.local.vlan !== null ? ` (VLAN ${e.local.vlan})` : ''}`} />}

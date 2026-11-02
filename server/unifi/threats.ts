@@ -2,11 +2,15 @@
 //   1. v2 traffic-flows filtered to INTRUSION_PREVENTION (Network 9.1+; the main source on 10.x/11.x,
 //      includes signature / category / CVE in its `ips` object)
 //   2. legacy stat/ips/event (Network 8.x-10.2; removed in 10.3+/11)
-//   3. v2 system-log/threat-alert (9.x+; no signature, used to fill gaps)
+//   3. v2 system-log/threat-alert (9.x+; no signature, used to fill gaps). Honeypot hits come from here:
+//      they name the device that touched the decoy, usually without any address.
 
+import { isIP } from 'node:net';
 import type { UniFiClient } from './client.ts';
 
 type Obj = Record<string, unknown>;
+
+export const HONEYPOT_SIGNATURE = 'UniFi internal honeypot triggered';
 
 export interface RawThreat {
   id: string;
@@ -47,6 +51,12 @@ const n = (v: unknown): number | null => {
   return Number.isFinite(x) ? x : null;
 };
 const o = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {});
+const MAC = /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
+/** The first value that is an IP address. */
+const ipOf = (...vs: unknown[]): string | null => vs.map(s).find((x): x is string => !!x && isIP(x) > 0) ?? null;
+/** The first value that is a MAC address, lower case with colons. */
+const macOf = (...vs: unknown[]): string | null => vs.map(s).find((x): x is string => !!x && MAC.test(x))?.toLowerCase().replaceAll('-', ':') ?? null;
+const mentionsHoneypot = (...vs: unknown[]) => vs.some((v) => typeof v === 'string' && /honeypot/i.test(v));
 
 function tsMs(v: unknown): number {
   const x = n(v) ?? 0;
@@ -96,17 +106,19 @@ export function parseIpsEvent(e: Obj): RawThreat | null {
   };
 }
 
-/** Parse one v2 traffic-flow row that was matched by the intrusion prevention engine. */
+/** Parse one v2 traffic-flow row that was matched by the intrusion prevention engine (or the honeypot). */
 export function parseTrafficFlow(f: Obj): RawThreat | null {
   const src = o(f.source);
   const dst = o(f.destination);
   const srcIp = s(src.ip);
   const dstIp = s(dst.ip);
-  if (!srcIp || !dstIp) return null;
-  const ips = o(f.ips);
   const policies = Array.isArray(f.policies) ? (f.policies as Obj[]) : [];
+  // UniFi lists a honeypot hit with no destination: the decoy's address is filled in later from the settings.
+  const honeypot = policies.some((p) => mentionsHoneypot(p.type, p.internal_type, p.name));
+  if (!srcIp || (!dstIp && !honeypot)) return null;
+  const ips = o(f.ips);
   const ipsPolicy = policies.find((p) => String(p.type ?? '').toUpperCase() === 'INTRUSION_PREVENTION') ?? null;
-  const signature = s(ips.signature) ?? s(ips.description) ?? (ipsPolicy ? s(ipsPolicy.name) : null);
+  const signature = honeypot ? HONEYPOT_SIGNATURE : (s(ips.signature) ?? s(ips.description) ?? (ipsPolicy ? s(ipsPolicy.name) : null));
   const cves = [ips.cve_reference, ips.relevant_cve]
     .flatMap((v) => (Array.isArray(v) ? v : typeof v === 'string' ? v.split(/[,\s]+/) : []))
     .map(String)
@@ -120,17 +132,17 @@ export function parseTrafficFlow(f: Obj): RawThreat | null {
     source: 'traffic-flow',
     signature,
     signatureId: n(ips.signature_id),
-    category: s(ips.category_name) ?? (ipsPolicy ? s(ipsPolicy.ips_category) : null),
+    category: honeypot ? 'honeypot' : (s(ips.category_name) ?? (ipsPolicy ? s(ipsPolicy.ips_category) : null)),
     classtype: s(ips.signature_class),
     description: s(ips.description) ?? s(ips.advanced_information),
     cves,
     priority: risk === 'high' ? 1 : risk === 'medium' ? 2 : risk === 'low' ? 3 : null,
     risk,
     action: action === 'blocked' ? 'blocked' : action === 'allowed' ? 'alerted' : 'unknown',
-    directionHint: dir === 'incoming' || dir === 'outgoing' || dir === 'local' ? dir : null,
+    directionHint: honeypot ? 'local' : dir === 'incoming' || dir === 'outgoing' || dir === 'local' ? dir : null,
     srcIp,
     srcPort: n(src.port),
-    dstIp,
+    dstIp: dstIp ?? '',
     dstPort: n(dst.port),
     proto: s(f.protocol),
     appProto: s(f.service),
@@ -151,17 +163,25 @@ export function parseTrafficFlow(f: Obj): RawThreat | null {
 /** Parse a v2 system-log threat-alert row (has no signature; used when flows are unavailable). */
 export function parseThreatAlert(a: Obj): RawThreat | null {
   const p = o(a.parameters);
-  const srcIp = s(o(p.SRC_IP).id) ?? s(o(p.SRC_IP).name);
-  const dstIp = s(o(p.DST_IP).id) ?? s(o(p.DST_IP).name);
-  if (!srcIp || !dstIp) return null;
   const key = String(a.key ?? a.event ?? '').toUpperCase();
-  const honeypot = key.includes('HONEYPOT');
+  const honeypot = mentionsHoneypot(key, a.subcategory, a.title_raw);
+  // Devices UniFi knows appear as SRC_CLIENT / DST_CLIENT, sometimes instead of an address. A honeypot hit
+  // (HONEYPOT_HIT_DETECTED[_V2|_KNOWN_CLIENT]) names the device that touched the decoy as CLIENT, often with no
+  // address at all; any other address it carries, apart from the gateway's (DEVICE), is the decoy's.
+  const from = o(p.SRC_CLIENT ?? (honeypot ? p.CLIENT : undefined));
+  const to = o(p.DST_CLIENT);
+  const others = honeypot ? Object.entries(p).filter(([k]) => !/^(SRC_IP|SRC_CLIENT|CLIENT|DEVICE)$/.test(k)).flatMap(([, v]) => [o(v).ip, o(v).id, o(v).name]) : [];
+  const srcIp = ipOf(o(p.SRC_IP).id, o(p.SRC_IP).name, from.ip) ?? '';
+  const dstIp = ipOf(o(p.DST_IP).id, o(p.DST_IP).name, to.ip, ...others) ?? '';
+  const srcMac = macOf(from.mac, from.id);
+  const dstMac = macOf(to.mac, to.id);
+  if ((!srcIp && !srcMac) || (!dstIp && !dstMac && !honeypot)) return null;
   const sev = String(a.severity ?? '').toUpperCase();
   return {
-    id: `alert:${s(a.id) ?? `${a.timestamp}-${srcIp}-${dstIp}`}`,
+    id: `alert:${s(a.id) ?? `${a.timestamp}-${srcIp || srcMac}-${dstIp || dstMac}`}`,
     ts: tsMs(a.timestamp),
     source: 'threat-alert',
-    signature: honeypot ? 'UniFi internal honeypot triggered' : s(a.title_raw) ?? 'Threat detected',
+    signature: honeypot ? HONEYPOT_SIGNATURE : (s(a.title_raw) ?? 'Threat detected'),
     signatureId: null,
     category: honeypot ? 'honeypot' : null,
     classtype: null,
@@ -170,17 +190,17 @@ export function parseThreatAlert(a: Obj): RawThreat | null {
     priority: sev === 'VERY_HIGH' || sev === 'HIGH' ? 1 : sev === 'MEDIUM' ? 2 : sev === 'LOW' ? 3 : null,
     risk: sev.toLowerCase() || null,
     action: key.includes('BLOCKED') ? 'blocked' : key.includes('DETECTED') || honeypot ? 'alerted' : 'unknown',
-    directionHint: null,
+    directionHint: honeypot ? 'local' : null,
     srcIp,
     srcPort: null,
     dstIp,
     dstPort: null,
     proto: null,
     appProto: null,
-    srcMac: null,
-    dstMac: null,
-    srcName: null,
-    dstName: null,
+    srcMac,
+    dstMac,
+    srcName: s(from.name) ?? s(from.hostname),
+    dstName: s(to.name) ?? s(to.hostname),
     srcNetworkId: null,
     dstNetworkId: null,
     srcCountry: null,
@@ -269,10 +289,20 @@ export async function fetchThreats(client: UniFiClient, from: number, to: number
       if (!data.length || (res.total_page_count !== undefined && page + 1 >= res.total_page_count) || rows.length >= 5000) break;
     }
     const parsed = rows.map(parseThreatAlert).filter((x): x is RawThreat => !!x);
-    const covered = (a: RawThreat) => events.some((e) => Math.abs(e.ts - a.ts) < 120_000 && ((e.srcIp === a.srcIp && e.dstIp === a.dstIp) || (e.srcIp === a.dstIp && e.dstIp === a.srcIp)));
-    const extra = parsed.filter((a) => a.category === 'honeypot' || !covered(a));
+    // Alerts can name a device by MAC address alone, so either address identifies an end.
+    const same = (ip: string, mac: string | null, ip2: string, mac2: string | null) => (!!ip && ip === ip2) || (!!mac && mac === mac2?.toLowerCase());
+    const covered = (a: RawThreat) =>
+      events.some(
+        (e) =>
+          Math.abs(e.ts - a.ts) < 120_000 &&
+          (a.category === 'honeypot'
+            ? e.category === 'honeypot' && same(a.srcIp, a.srcMac, e.srcIp, e.srcMac)
+            : (same(a.srcIp, a.srcMac, e.srcIp, e.srcMac) && same(a.dstIp, a.dstMac, e.dstIp, e.dstMac)) || (same(a.srcIp, a.srcMac, e.dstIp, e.dstMac) && same(a.dstIp, a.dstMac, e.srcIp, e.srcMac))),
+      );
+    const extra = parsed.filter((a) => !covered(a));
     events.push(...extra);
-    sources.push({ name: 'System log threat alerts', ok: true, count: parsed.length, detail: `${parsed.length} alerts, ${extra.length} not covered by flows` });
+    const pots = parsed.filter((a) => a.category === 'honeypot').length;
+    sources.push({ name: 'System log threat alerts', ok: true, count: parsed.length, detail: `${parsed.length} alerts${pots ? ` (${pots} honeypot)` : ''}, ${extra.length} not covered by flows` });
   } catch (e) {
     sources.push({ name: 'System log threat alerts', ok: false, count: 0, detail: err(e) });
   }

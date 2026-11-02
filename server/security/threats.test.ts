@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseIpsEvent, parseThreatAlert, parseTrafficFlow } from '../unifi/threats.ts';
+import type { UniFiClient } from '../unifi/client.ts';
+import { fetchThreats, parseIpsEvent, parseThreatAlert, parseTrafficFlow } from '../unifi/threats.ts';
 import { analyzeSignature, assessSeverity } from './threatKb.ts';
 import { toThreatEvent, type Directory } from './threats.ts';
 import { AddrSet } from './sets.ts';
@@ -31,10 +32,39 @@ const THREAT_ALERT = {
   parameters: { SRC_IP: { id: '192.168.3.62', name: '192.168.3.62' }, DST_IP: { id: '100.126.147.59', name: '100.126.147.59' } },
 };
 
+// Honeypot hits, modelled on UniFi's documented key names and the Security export of a live 10.6 console:
+// the device that touched the decoy is named (CLIENT), with no address; DEVICE is the gateway.
+const HONEYPOT_ALERT = {
+  category: 'SECURITY', subcategory: 'SECURITY_HONEYPOT', event: 'HONEYPOT_HIT_DETECTED', key: 'HONEYPOT_HIT_DETECTED_KNOWN_CLIENT', id: 'a-honeypot-1',
+  severity: 'HIGH', timestamp: 1793600030000, title_raw: 'Honeypot Triggered', message: 'Honeypot triggered by Laptop-01 00:07.',
+  parameters: { CLIENT: { id: '02:00:00:00:00:07', name: 'Laptop-01 00:07', hostname: 'Laptop-01' }, DEVICE: { id: '02:00:00:00:00:06', ip: '192.168.3.1', name: 'Gateway' } },
+};
+
+// UniFi's Flows view shows the same hit with the policy "Honeypot" and no destination.
+const HONEYPOT_FLOW = {
+  id: 'f-honeypot-1', action: 'allowed', count: 1, direction: 'local', protocol: 'TCP', service: 'SSH', risk: 'low', time: 1793600000000,
+  source: { ip: '192.168.3.40', port: 51522, mac: '02:00:00:00:00:07', client_name: 'Laptop-01', network_id: 'n0', network_name: 'LAN' },
+  destination: {},
+  policies: [{ id: 'p-hp', name: 'Honeypot' }],
+};
+
 function dir(): Directory {
   const net = { id: 'n1', name: 'IOT', vlan: 2, addrs: AddrSet.parse('192.168.2.0/24')!, raw: {} } as unknown as NetInfo;
   const lan = { id: 'n0', name: 'LAN', vlan: 1, addrs: AddrSet.parse('192.168.3.0/24')!, raw: {} } as unknown as NetInfo;
-  return { networks: [net, lan], wanIps: new Set(['203.0.113.1']), byIp: new Map([['192.168.3.2', { mac: null, name: 'NAS', networkId: 'n0' }]]), byMac: new Map() };
+  return {
+    networks: [net, lan],
+    wanIps: new Set(['203.0.113.1']),
+    byIp: new Map([
+      ['192.168.3.2', { mac: null, name: 'NAS', networkId: 'n0' }],
+      ['192.168.3.40', { mac: '02:00:00:00:00:07', name: 'Laptop-01', networkId: 'n0' }],
+      ['192.168.3.20', { mac: '02:00:00:00:00:08', name: 'Phone-01', networkId: 'n0' }],
+    ]),
+    byMac: new Map([
+      ['02:00:00:00:00:07', { ip: '192.168.3.40', name: 'Laptop-01' }],
+      ['02:00:00:00:00:08', { ip: '192.168.3.20', name: 'Phone-01' }],
+    ]),
+    honeypots: ['192.168.2.2', '192.168.3.250'],
+  };
 }
 
 test('legacy stat/ips/event documents parse (timestamp in seconds, time in ms)', () => {
@@ -68,6 +98,83 @@ test('v2 system-log threat alerts parse without a signature', () => {
   assert.equal(r.srcIp, '192.168.3.62');
   const e = toThreatEvent(r, dir());
   assert.equal(e.direction, 'outbound', '100.64/10 is CGNAT, but the destination is not one of our networks');
+});
+
+test('a honeypot hit that names only the device becomes a serious detection by that device', () => {
+  const r = parseThreatAlert(HONEYPOT_ALERT)!;
+  assert.ok(r, 'it used to be dropped for having no addresses');
+  assert.equal(r.category, 'honeypot');
+  assert.equal(r.srcMac, '02:00:00:00:00:07');
+  assert.equal(r.dstIp, '', "the gateway's own address is not the decoy's");
+  const e = toThreatEvent(r, dir());
+  assert.equal(e.srcIp, '192.168.3.40', 'its address comes from the device list');
+  assert.equal(e.dstIp, '192.168.3.250', 'the decoy on its own network');
+  assert.equal(e.direction, 'internal');
+  assert.equal(e.categoryKey, 'honeypot');
+  assert.equal(e.severity, 'critical', 'UniFi rated it high, and it came from inside');
+  assert.equal(e.local?.name, 'Laptop-01');
+  assert.match(e.advice, /scanner|monitoring/);
+});
+
+test('a honeypot hit by a device that has left still shows who it was', () => {
+  const gone = { ...HONEYPOT_ALERT, id: 'a-honeypot-2', parameters: { CLIENT: { id: '02:00:00:00:00:09', name: 'Tablet 00:09' } } };
+  const e = toThreatEvent(parseThreatAlert(gone)!, dir());
+  assert.equal(e.srcIp, '');
+  assert.equal(e.dstIp, '', 'two decoys and no address: which one is unknown');
+  assert.equal(e.direction, 'internal');
+  assert.equal(e.local?.name, 'Tablet 00:09');
+  assert.equal(e.local?.mac, '02:00:00:00:00:09');
+  assert.equal(e.localIp, null);
+  assert.equal(e.remoteIp, null);
+});
+
+test('a honeypot hit with addresses keeps them', () => {
+  const r = parseThreatAlert({ ...HONEYPOT_ALERT, key: 'HONEYPOT_HIT_DETECTED', parameters: { SRC_IP: { id: '192.168.2.50', name: '192.168.2.50' }, DST_IP: { id: '192.168.2.2', name: '192.168.2.2' } } })!;
+  const e = toThreatEvent(r, dir());
+  assert.deepEqual([e.srcIp, e.dstIp, e.direction, e.local?.network], ['192.168.2.50', '192.168.2.2', 'internal', 'IOT']);
+});
+
+test('a honeypot flow without a destination is read, and the decoy is filled in', () => {
+  const r = parseTrafficFlow(HONEYPOT_FLOW)!;
+  assert.ok(r, 'it used to be dropped for having no destination');
+  assert.equal(r.signature, 'UniFi internal honeypot triggered');
+  const e = toThreatEvent(r, dir());
+  assert.deepEqual([e.srcIp, e.dstIp, e.dstPort, e.appProto], ['192.168.3.40', '192.168.3.250', null, 'SSH']);
+  assert.equal(e.categoryKey, 'honeypot');
+  assert.equal(e.severity, 'high');
+  assert.equal(parseTrafficFlow({ ...FLOW_ROW, destination: {} }), null, 'other flows still need a destination');
+});
+
+test('an alert about a device UniFi knows by name gets its address from the device list', () => {
+  const alert = {
+    ...THREAT_ALERT, id: 'a-known-1', key: 'THREAT_BLOCKED_KNOWN_DESTINATION_CLIENT',
+    message: 'A network intrusion attempt from 203.0.113.10 to Phone-01 00:08 has been detected and blocked.',
+    parameters: { SRC_IP: { id: '203.0.113.10', name: '203.0.113.10' }, DST_CLIENT: { id: '02:00:00:00:00:08', name: 'Phone-01 00:08', hostname: 'Phone-01' } },
+  };
+  const e = toThreatEvent(parseThreatAlert(alert)!, dir());
+  assert.deepEqual([e.srcIp, e.dstIp, e.direction, e.local?.name], ['203.0.113.10', '192.168.3.20', 'inbound', 'Phone-01']);
+});
+
+test('a honeypot hit in both the flows and the system log is counted once', async () => {
+  const other = { ...HONEYPOT_ALERT, id: 'a-honeypot-3', parameters: { CLIENT: { id: '02:00:00:00:00:0a', name: 'Printer 00:0a' } } };
+  // A detection of the same device's traffic by the intrusion prevention engine does not hide a honeypot hit.
+  const ips = { ...FLOW_ROW, id: 'f-ips-1', time: 1793600010000, source: HONEYPOT_FLOW.source, destination: { ip: '192.168.3.250', port: 22 } };
+  const client = {
+    v2: async (_m: string, p: string, body: { pageNumber: number }) => {
+      if (body.pageNumber > 0) return { data: [] };
+      if (p === '/traffic-flows') return { data: [HONEYPOT_FLOW, ips], has_next: false };
+      if (p === '/system-log/threat-alert') return { data: [HONEYPOT_ALERT, other], total_page_count: 1 };
+      throw new Error(`404 ${p}`);
+    },
+    v1: async () => {
+      throw new Error('404 not found');
+    },
+  } as unknown as UniFiClient;
+  const res = await fetchThreats(client, 0, Date.now());
+  const pots = res.events.filter((e) => e.category === 'honeypot');
+  assert.deepEqual(pots.map((e) => e.id).sort(), ['alert:a-honeypot-3', 'flow:f-honeypot-1']);
+  assert.equal(res.events.length, 3);
+  assert.match(res.sources.find((s) => s.name === 'System log threat alerts')!.detail, /2 alerts \(2 honeypot\), 1 not covered/);
 });
 
 test('signature classification', () => {

@@ -6,7 +6,7 @@ import type { ClientDetail } from '@shared/types';
 import { NETWORK_ROLES } from '@shared/types';
 import { api } from '../lib/api';
 import { fmtBps, fmtBytes, fmtDuration, fmtNum, fmtTime, timeAgo } from '../lib/format';
-import { ActionBadge, Badge, Button, Callout, CountryTag, DirectionBadge, Drawer, ErrorBox, KV, Loading, REACH_STYLE, reachLabel, SEVERITY_HEX } from './ui';
+import { ActionBadge, Badge, Button, Callout, DirectionBadge, Drawer, ErrorBox, EventEnd, KV, Loading, REACH_STYLE, reachLabel, SEVERITY_HEX } from './ui';
 import { HourlyUsage } from './charts';
 
 /** A detail row, left out when the value is unknown. */
@@ -109,15 +109,16 @@ function Security({ d }: { d: ClientDetail }) {
             </div>
             <ul className="divide-y divide-line/50 rounded-lg border border-line">
               {t.recent.slice(0, 10).map((e) => {
-                const peer = e.localIp === d.ip ? (e.remoteIp ?? (e.srcIp === d.ip ? e.dstIp : e.srcIp)) : e.localIp;
+                // The other end: for traffic inside your network that is another device (or the honeypot), not this one.
+                const peer = e.srcIp === d.ip ? 'dst' : 'src';
                 return (
                   <li key={e.id} className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-surface-2/60" onClick={() => navigate(`/threats?id=${encodeURIComponent(e.id)}`)}>
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: SEVERITY_HEX[e.severity] }} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-ink">{e.headline}</span>
-                      <span className="flex items-center gap-1 text-xs text-ink-3">
-                        {timeAgo(e.ts)} · {e.remoteCountry && <CountryTag code={e.remoteCountry} />}
-                        <span className="mono truncate">{peer}</span>
+                      <span className="flex min-w-0 items-center gap-1 text-xs text-ink-3">
+                        <span className="shrink-0">{timeAgo(e.ts)} ·</span>
+                        <EventEnd e={e} end={peer} />
                       </span>
                     </span>
                     <span className="hidden sm:contents">

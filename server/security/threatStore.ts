@@ -186,12 +186,14 @@ export class ThreatStore {
       // Internal devices behaving badly (outbound / lateral malicious categories).
       const fam = THREAT_CATEGORIES[e.categoryKey]?.family ?? 'other';
       if ((e.direction === 'outbound' || e.direction === 'internal') && e.local && !['policy', 'info', 'protocol', 'other'].includes(fam) && sevRank(e.severity) >= sevRank('medium')) {
-        const sp = suspects.get(e.local.ip) ?? { ip: e.local.ip, name: e.local.name, network: e.local.network, count: 0, categories: [], severity: e.severity, lastSeen: e.ts, cats: new Set<string>() };
+        // A device the alert named only by MAC address or name has no IP to group by.
+        const who = e.local.ip || e.local.mac || e.local.name || '';
+        const sp = suspects.get(who) ?? { ip: e.local.ip, name: e.local.name, network: e.local.network, count: 0, categories: [], severity: e.severity, lastSeen: e.ts, cats: new Set<string>() };
         sp.count += n;
         sp.cats.add(e.categoryKey);
         sp.severity = maxSeverity(sp.severity, e.severity);
         sp.lastSeen = Math.max(sp.lastSeen, e.ts);
-        suspects.set(e.local.ip, sp);
+        suspects.set(who, sp);
       }
     }
 

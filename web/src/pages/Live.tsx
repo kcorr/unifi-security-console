@@ -150,7 +150,7 @@ export function LivePage() {
                   <span className="w-12 shrink-0 text-xs text-ink-3 sm:w-16">{timeAgo(e.ts)}</span>
                   <span className="min-w-0 flex-1 truncate text-sm text-ink">{e.headline}</span>
                   {e.remoteCountry && <CountryTag code={e.remoteCountry} />}
-                  <span className="mono hidden text-xs text-ink-3 md:inline">{e.remoteIp ?? e.srcIp}</span>
+                  <span className="mono hidden text-xs text-ink-3 md:inline">{e.remoteIp ?? (e.srcIp || e.local?.name)}</span>
                   {/* On a phone the name needs the room; the direction is on the detail page. */}
                   <span className="hidden sm:contents">
                     <DirectionBadge direction={e.direction} />

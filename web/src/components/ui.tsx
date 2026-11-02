@@ -264,9 +264,24 @@ export function reachLabel(c: { verdict: ReachVerdict; summary: string }): strin
   return c.summary.startsWith('Mostly blocked') ? 'Mostly blocked' : 'Mostly open';
 }
 
-/** One side of a detection: your device by name, or the outside address with its country. Works for both directions. */
-export function EventEnd({ e, ip }: { e: ThreatEvent; ip: string }) {
-  if (e.local?.name && ip === e.localIp) return <span className="min-w-0 truncate">{e.local.name}</span>;
+/** Which side of a detection is your device (`e.local`), if either. */
+export function localEnd(e: ThreatEvent): 'src' | 'dst' | null {
+  return e.direction === 'inbound' ? 'dst' : e.direction === 'outbound' || e.direction === 'internal' ? 'src' : null;
+}
+
+/** One side of a detection: your device by name, the honeypot, or the outside address with its country. Works for both directions. */
+export function EventEnd({ e, end }: { e: ThreatEvent; end: 'src' | 'dst' }) {
+  const ip = end === 'src' ? e.srcIp : e.dstIp;
+  if (end === localEnd(e) && e.local?.name) return <span className="min-w-0 truncate">{e.local.name}</span>;
+  if (end === 'dst' && e.categoryKey === 'honeypot') {
+    return (
+      <span className="flex min-w-0 items-center gap-1">
+        <span className="shrink-0">Honeypot</span>
+        {ip && <span className="mono truncate">{ip}</span>}
+      </span>
+    );
+  }
+  if (!ip) return <span className="text-ink-3">address unknown</span>;
   return (
     <span className="flex min-w-0 items-center gap-1">
       {ip === e.remoteIp && e.remoteCountry && <CountryTag code={e.remoteCountry} />}

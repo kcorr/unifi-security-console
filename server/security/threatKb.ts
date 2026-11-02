@@ -392,7 +392,10 @@ export const THREAT_CATEGORIES: Record<string, ThreatCategory> = {
     inbound: '—',
     outbound: '—',
     internal: 'The source device is probing your network. Identify it and check it for compromise.',
-    recommendations: ['Identify the source device and isolate it if you do not recognise the behaviour.'],
+    recommendations: [
+      'A network scanner or monitoring tool that you run on that device explains a hit.',
+      'Otherwise check the device for malware and isolate it until you know why it did this.',
+    ],
     mitre: [{ id: 'T1046', name: 'Network Service Discovery', tactic: 'Discovery' }],
   },
   'tls-fingerprint': {
@@ -730,6 +733,8 @@ export function explainEvent(p: { categoryKey: string; direction: ThreatDirectio
       cat.family === 'policy' || cat.family === 'info' || cat.family === 'protocol'
         ? 'Check that this behaviour is expected for that device.'
         : 'Investigate the internal device that started this connection — it may be compromised.';
+  } else if (p.categoryKey === 'honeypot') {
+    action = 'If that device runs a network scanner or monitoring tool you set up, that explains it. Otherwise check it for malware and isolate it until you know why.';
   } else if (p.direction === 'internal') {
     action = 'Investigate the source device and consider isolating it on its own VLAN.';
   } else {
